@@ -1,6 +1,9 @@
 import { io } from "socket.io-client";
 import { useRef, useEffect, useState } from "react";
 import { FiVideo, FiVideoOff, FiMic, FiMicOff } from "react-icons/fi";
+import { useSearchParams } from 'react-router-dom';
+
+const [searchParams] = useSearchParams();
 
 const configuration = {
   iceServers: [
@@ -12,7 +15,7 @@ const configuration = {
 };
 
 const socket = io("https://visible-marylou-adrig0-f6c34b2a.koyeb.app", { transports: ["websocket"] });
-const roomId = "123"; // You can dynamically generate or assign this
+const roomId = searchParams.get('id'); // You can dynamically generate or assign this
 
 let pc;
 let localStream;
