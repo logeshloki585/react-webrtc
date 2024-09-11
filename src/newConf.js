@@ -3,8 +3,6 @@ import { useRef, useEffect, useState } from "react";
 import { FiVideo, FiVideoOff, FiMic, FiMicOff } from "react-icons/fi";
 import { useSearchParams } from 'react-router-dom';
 
-const [searchParams] = useSearchParams();
-
 const configuration = {
   iceServers: [
     {
@@ -14,167 +12,176 @@ const configuration = {
   iceCandidatePoolSize: 10,
 };
 
-const socket = io("https://visible-marylou-adrig0-f6c34b2a.koyeb.app", { transports: ["websocket"] });
-const roomId = searchParams.get('id'); // You can dynamically generate or assign this
+function NewConf() {
+  const [searchParams] = useSearchParams();
+  const roomId = searchParams.get('id'); // Get roomId from URL
 
-let pc;
-let localStream;
-let startButton;
-let hangupButton;
-let muteAudButton;
-let remoteVideo;
-let localVideo;
+  const [audiostate, setAudio] = useState(false);
+  const startButton = useRef(null);
+  const hangupButton = useRef(null);
+  const muteAudButton = useRef(null);
+  const localVideo = useRef(null);
+  const remoteVideo = useRef(null);
 
-// Join the room when the component loads
-socket.emit("join-room", roomId);
+  const socket = io("https://visible-marylou-adrig0-f6c34b2a.koyeb.app", { transports: ["websocket"] });
+  let pc;
+  let localStream;
 
-socket.on("message", (e) => {
-  if (!localStream) {
-    console.log("Not ready yet");
-    return;
-  }
-  console.log("Message received:", e);
-  switch (e.type) {
-    case "offer":
-      handleOffer(e);
-      break;
-    case "answer":
-      handleAnswer(e);
-      break;
-    case "candidate":
-      handleCandidate(e);
-      break;
-    case "ready":
-      if (pc) {
-        console.log("Already in call, ignoring");
+  useEffect(() => {
+    if (!roomId) return; // Exit if no roomId is found
+
+    // Join the room when the component loads
+    socket.emit("join-room", roomId);
+
+    socket.on("message", (e) => {
+      if (!localStream) {
+        console.log("Not ready yet");
         return;
       }
-      makeCall();
-      break;
-    case "bye":
+      console.log("Message received:", e);
+      switch (e.type) {
+        case "offer":
+          handleOffer(e);
+          break;
+        case "answer":
+          handleAnswer(e);
+          break;
+        case "candidate":
+          handleCandidate(e);
+          break;
+        case "ready":
+          if (pc) {
+            console.log("Already in call, ignoring");
+            return;
+          }
+          makeCall();
+          break;
+        case "bye":
+          if (pc) {
+            hangup();
+          }
+          break;
+        default:
+          console.log("Unhandled message:", e);
+          break;
+      }
+    });
+
+    // Cleanup on unmount
+    return () => {
       if (pc) {
-        hangup();
+        pc.close();
+        pc = null;
       }
-      break;
-    default:
-      console.log("Unhandled message:", e);
-      break;
-  }
-});
-
-async function makeCall() {
-  try {
-    pc = new RTCPeerConnection(configuration);
-    pc.onicecandidate = (e) => {
-      const message = {
-        type: "candidate",
-        candidate: null,
-      };
-      if (e.candidate) {
-        message.candidate = e.candidate.candidate;
-        message.sdpMid = e.candidate.sdpMid;
-        message.sdpMLineIndex = e.candidate.sdpMLineIndex;
+      if (localStream) {
+        localStream.getTracks().forEach((track) => track.stop());
+        localStream = null;
       }
-      if (message.candidate !== null) {
-        socket.emit("message", message, roomId); // Include roomId when emitting
-      }
+    //   socket.disconnect();
     };
-    pc.ontrack = (e) => (remoteVideo.current.srcObject = e.streams[0]);
-    localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
-    const offer = await pc.createOffer();
-    socket.emit("message", { type: "offer", sdp: offer.sdp }, roomId); // Include roomId when emitting
-    await pc.setLocalDescription(offer);
-  } catch (e) {
-    console.log(e);
-  }
-}
+  }, [roomId]); // Dependency array includes roomId
 
-async function handleOffer(offer) {
-  if (pc) {
-    console.error("Existing peer connection");
-    return;
-  }
-  try {
-    pc = new RTCPeerConnection(configuration);
-    pc.onicecandidate = (e) => {
-      const message = {
-        type: "candidate",
-        candidate: null,
+  async function makeCall() {
+    try {
+      pc = new RTCPeerConnection(configuration);
+      pc.onicecandidate = (e) => {
+        const message = {
+          type: "candidate",
+          candidate: null,
+        };
+        if (e.candidate) {
+          message.candidate = e.candidate.candidate;
+          message.sdpMid = e.candidate.sdpMid;
+          message.sdpMLineIndex = e.candidate.sdpMLineIndex;
+        }
+        if (message.candidate !== null) {
+          socket.emit("message", message, roomId); // Include roomId when emitting
+        }
       };
-      if (e.candidate) {
-        message.candidate = e.candidate.candidate;
-        message.sdpMid = e.candidate.sdpMid;
-        message.sdpMLineIndex = e.candidate.sdpMLineIndex;
-      }
-      if (message.candidate !== null) {
-        socket.emit("message", message, roomId); // Include roomId when emitting
-      }
-    };
-    pc.ontrack = (e) => (remoteVideo.current.srcObject = e.streams[0]);
-    localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
-    await pc.setRemoteDescription(offer);
-
-    const answer = await pc.createAnswer();
-    socket.emit("message", { type: "answer", sdp: answer.sdp }, roomId); // Include roomId when emitting
-    await pc.setLocalDescription(answer);
-  } catch (e) {
-    console.log(e);
+      pc.ontrack = (e) => (remoteVideo.current.srcObject = e.streams[0]);
+      localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+      const offer = await pc.createOffer();
+      socket.emit("message", { type: "offer", sdp: offer.sdp }, roomId); // Include roomId when emitting
+      await pc.setLocalDescription(offer);
+    } catch (e) {
+      console.log(e);
+    }
   }
-}
 
-async function handleAnswer(answer) {
-  if (!pc) {
-    console.error("No peer connection");
-    return;
-  }
-  try {
-    await pc.setRemoteDescription(answer);
-  } catch (e) {
-    console.log(e);
-  }
-}
+  async function handleOffer(offer) {
+    if (pc) {
+      console.error("Existing peer connection");
+      return;
+    }
+    try {
+      pc = new RTCPeerConnection(configuration);
+      pc.onicecandidate = (e) => {
+        const message = {
+          type: "candidate",
+          candidate: null,
+        };
+        if (e.candidate) {
+          message.candidate = e.candidate.candidate;
+          message.sdpMid = e.candidate.sdpMid;
+          message.sdpMLineIndex = e.candidate.sdpMLineIndex;
+        }
+        if (message.candidate !== null) {
+          socket.emit("message", message, roomId); // Include roomId when emitting
+        }
+      };
+      pc.ontrack = (e) => (remoteVideo.current.srcObject = e.streams[0]);
+      localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+      await pc.setRemoteDescription(offer);
 
-async function handleCandidate(candidate) {
-  try {
+      const answer = await pc.createAnswer();
+      socket.emit("message", { type: "answer", sdp: answer.sdp }, roomId); // Include roomId when emitting
+      await pc.setLocalDescription(answer);
+    } catch (e) {
+      console.log(e);
+    }
+  }
+
+  async function handleAnswer(answer) {
     if (!pc) {
       console.error("No peer connection");
       return;
     }
-    if (!candidate || (!candidate.sdpMid && candidate.sdpMLineIndex === null)) {
-      console.error("Candidate is missing sdpMid or sdpMLineIndex");
-      return;
+    try {
+      await pc.setRemoteDescription(answer);
+    } catch (e) {
+      console.log(e);
     }
-    await pc.addIceCandidate(candidate);
-  } catch (e) {
-    console.log(e, candidate);
   }
-}
 
-async function hangup() {
-  if (pc) {
-    pc.close();
-    pc = null;
+  async function handleCandidate(candidate) {
+    try {
+      if (!pc) {
+        console.error("No peer connection");
+        return;
+      }
+      if (!candidate || (!candidate.sdpMid && candidate.sdpMLineIndex === null)) {
+        console.error("Candidate is missing sdpMid or sdpMLineIndex");
+        return;
+      }
+      await pc.addIceCandidate(candidate);
+    } catch (e) {
+      console.log(e, candidate);
+    }
   }
-  localStream.getTracks().forEach((track) => track.stop());
-  localStream = null;
-  startButton.current.disabled = false;
-  hangupButton.current.disabled = true;
-  muteAudButton.current.disabled = true;
-}
 
-function NewConf() {
-  startButton = useRef(null);
-  hangupButton = useRef(null);
-  muteAudButton = useRef(null);
-  localVideo = useRef(null);
-  remoteVideo = useRef(null);
-  
-  useEffect(() => {
+  async function hangup() {
+    if (pc) {
+      pc.close();
+      pc = null;
+    }
+    if (localStream) {
+      localStream.getTracks().forEach((track) => track.stop());
+      localStream = null;
+    }
+    startButton.current.disabled = false;
     hangupButton.current.disabled = true;
     muteAudButton.current.disabled = true;
-  }, []);
-  
-  const [audiostate, setAudio] = useState(false);
+  }
 
   const startB = async () => {
     try {
